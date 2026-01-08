@@ -1,0 +1,23 @@
+### Test Transaction List (Empty)
+GET http://localhost:5295/api/transactions
+X-API-Key: test-key-user1
+
+### Test Transaction List with Pagination
+GET http://localhost:5295/api/transactions?page=1&pageSize=10
+X-API-Key: test-key-user1
+
+### Test Import Endpoint (Placeholder)
+POST http://localhost:5295/api/transactions/import
+X-API-Key: test-key-user1
+Content-Type: multipart/form-data; boundary=WebAppBoundary
+
+--WebAppBoundary
+Content-Disposition: form-data; name="account"
+
+Checking Account
+--WebAppBoundary
+Content-Disposition: form-data; name="file"; filename="generic-bank-sample.csv"
+Content-Type: text/csv
+
+< ./samples/generic-bank-sample.csv
+--WebAppBoundary--
