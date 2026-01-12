@@ -3,7 +3,9 @@ import type {
   TransactionListDto,
   GetTransactionsParams,
   ImportTransactionsParams,
-  ImportResult
+  ImportResult,
+  EnhanceImportRequest,
+  EnhanceImportResult
 } from './types';
 
 function handleError(message: string, error: any): void {
@@ -31,5 +33,13 @@ export const transactionsApi = {
       handleError('Failed to import transactions', error);
       throw error;
     }
+  },
+
+  async enhanceImport(request: EnhanceImportRequest): Promise<EnhanceImportResult> {
+    const response = await apiClient.post<EnhanceImportResult>(
+      '/transactions/import/enhance',
+      request
+    );
+    return response.data;
   }
 };

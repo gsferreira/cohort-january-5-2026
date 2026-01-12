@@ -94,9 +94,9 @@ Add tags for organization:
 ### 11.2.2: Configure Model Deployment
 
 **Deployment Settings:**
-- **Model**: Select "gpt-4o-mini" (recommended)
+- **Model**: Select "gpt-4.1-mini" (recommended)
 - **Model version**: Use the default latest version
-- **Deployment name**: Enter "gpt-4o-mini" (remember this name!)
+- **Deployment name**: Enter "gpt-4.1-mini" (remember this name!)
 - **Content filter**: Use default settings
 - **Deployment type**: Standard
 - **Tokens per minute rate limit**: Use default settings
@@ -160,11 +160,11 @@ If this works, your Azure OpenAI setup is complete!
 You've successfully set up:
 
 ✅ **Azure OpenAI Resource**: Created and configured in Azure portal
-✅ **Model Deployment**: gpt-4o-mini deployed and ready
+✅ **Model Deployment**: gpt-4.1-mini deployed and ready
 ✅ **API Credentials**: Endpoint and API key collected securely
 ✅ **Tested Access**: Verified the setup works via Azure AI Foundry
 
-**Next Step**: Move to [012-ai-transaction-enhancement-backend.md](012-ai-transaction-enhancement-backend.md) to configure your local environment and implement the AI service infrastructure.
+**Next Step**: Move to [012-ai-transaction-enhancement-backend.md](021-ai-transaction-enhancement-backend.md) to configure your local environment and implement the AI service infrastructure.
 
 ---
 

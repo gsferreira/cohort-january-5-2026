@@ -48,13 +48,13 @@ dotnet user-secrets set "AzureAI:Endpoint" "https://your-resource.cognitiveservi
 dotnet user-secrets set "AzureAI:ApiKey" "your-api-key-here"
 
 # Set your deployment name
-dotnet user-secrets set "AzureAI:DeploymentName" "gpt-4o-mini"
+dotnet user-secrets set "AzureAI:DeploymentName" "gpt-4.1-mini"
 ```
 
 **Replace with your actual values:**
 - `your-resource`: Your actual Azure resource name
 - `your-api-key-here`: The API key you copied from Azure portal
-- `gpt-4o-mini`: Your actual deployment name
+- `gpt-4.1-mini`: Your actual deployment name
 
 ### 12.1.3: Verify User Secrets
 
@@ -68,7 +68,7 @@ You should see output like:
 ```
 AzureAI:Endpoint = https://your-resource.openai.azure.com/
 AzureAI:ApiKey = [Hidden]
-AzureAI:DeploymentName = gpt-4o-mini
+AzureAI:DeploymentName = gpt-4.1-mini
 ```
 
 ### 12.1.4: Update appsettings Structure

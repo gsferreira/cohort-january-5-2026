@@ -3,6 +3,7 @@ using BudgetTracker.Api.AntiForgery;
 using BudgetTracker.Api.Auth;
 using BudgetTracker.Api.Features.Transactions;
 using BudgetTracker.Api.Features.Transactions.Import.Processing;
+using BudgetTracker.Api.Features.Transactions.Import.Enhancement;
 using BudgetTracker.Api.Infrastructure;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.AI;
@@ -121,6 +122,9 @@ builder.Services.AddSingleton<IChatClient>(sp =>
         .AsIChatClient();
 });
 
+// Register enhancement service (IChatClient is already registered above)
+builder.Services.AddScoped<ITransactionEnhancer, TransactionEnhancer>();
+
 var app = builder.Build();
 
 // Apply migrations at startup
@@ -158,12 +162,5 @@ app
     .MapAntiForgeryEndpoints()
     .MapAuthEndpoints()
     .MapTransactionEndpoints();
-
-// Temporary test endpoint for Azure OpenAI (remove after verification)
-app.MapGet("/api/ai/test", async (IChatClient chatClient) =>
-{
-    var response = await chatClient.GetResponseAsync("Say 'Hello from Azure OpenAI!' in exactly those words.");
-    return Results.Ok(new { message = response.Text });
-}).WithTags("AI Test");
 
 app.Run();

@@ -38,6 +38,9 @@ public class Transaction
     [MaxLength(100)]
     public string Account { get; set; } = string.Empty;
 
+    [MaxLength(50)]
+    public string? ImportSessionHash { get; set; }
+
     [Required]
     public string UserId { get; set; } = string.Empty;
 }
