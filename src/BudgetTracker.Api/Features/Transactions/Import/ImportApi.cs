@@ -5,6 +5,7 @@ using BudgetTracker.Api.Auth;
 using BudgetTracker.Api.Infrastructure;
 using BudgetTracker.Api.Features.Transactions.Import.Processing;
 using BudgetTracker.Api.Features.Transactions.Import.Enhancement;
+using BudgetTracker.Api.Features.Transactions.Import.Detection;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -27,10 +28,14 @@ public static class ImportApi
         IFormFile file,
         [FromForm] string account,
         CsvImporter csvImporter,
+        IImageImporter imageImporter,
         ITransactionEnhancer enhancer,
+        ICsvStructureDetector structureDetector,
         BudgetTrackerContext context,
         ClaimsPrincipal claimsPrincipal)
     {
+        const double MinConfidenceThreshold = 0.85;
+
         var validationResult = ValidateFileInput(file, account);
         if (validationResult != null)
         {
@@ -42,8 +47,35 @@ public static class ImportApi
             var userId = claimsPrincipal.GetUserId();
             var sessionHash = GenerateSessionHash(file.FileName, DateTime.UtcNow);
 
-            using var stream = file.OpenReadStream();
-            var (result, transactions) = await csvImporter.ParseCsvAsync(stream, file.FileName, userId, account);
+            using var stream = new MemoryStream();
+            await file.CopyToAsync(stream);
+            stream.Position = 0;
+
+            ImportResult result;
+            List<Transaction> transactions;
+
+            if (IsImageFile(file.FileName))
+            {
+                (result, transactions) = await imageImporter.ProcessImageAsync(
+                    stream, file.FileName, userId, account);
+            }
+            else
+            {
+                var detectionResult = await structureDetector.DetectStructureAsync(stream);
+
+                if (detectionResult.ConfidenceScore < MinConfidenceThreshold)
+                {
+                    return TypedResults.BadRequest(
+                        $"Unable to detect CSV structure with sufficient confidence. " +
+                        $"Detection method: {detectionResult.DetectionMethod}, " +
+                        $"Confidence: {detectionResult.ConfidenceScore:P0}. " +
+                        $"Please ensure the CSV has recognizable column headers.");
+                }
+
+                stream.Position = 0;
+                (result, transactions) = await csvImporter.ParseCsvAsync(
+                    stream, file.FileName, userId, account, detectionResult);
+            }
 
             if (transactions.Any())
             {
@@ -165,8 +197,11 @@ public static class ImportApi
         if (file == null || file.Length == 0)
             return TypedResults.BadRequest("No file uploaded");
 
-        if (!file.FileName.EndsWith(".csv", StringComparison.OrdinalIgnoreCase))
-            return TypedResults.BadRequest("Only CSV files are supported");
+        var allowedExtensions = new[] { ".csv", ".png", ".jpg", ".jpeg" };
+        var fileExtension = Path.GetExtension(file.FileName).ToLowerInvariant();
+
+        if (!allowedExtensions.Contains(fileExtension))
+            return TypedResults.BadRequest("Only CSV files and images (PNG, JPG, JPEG) are supported");
 
         if (file.Length > 10 * 1024 * 1024)
             return TypedResults.BadRequest("File size exceeds 10MB limit");
@@ -175,5 +210,11 @@ public static class ImportApi
             return TypedResults.BadRequest("Account name is required");
 
         return null;
+    }
+
+    private static bool IsImageFile(string fileName)
+    {
+        var extension = Path.GetExtension(fileName).ToLowerInvariant();
+        return extension is ".png" or ".jpg" or ".jpeg";
     }
 }

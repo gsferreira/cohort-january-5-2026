@@ -50,6 +50,8 @@ export interface ImportResult {
   importedAt: string;
   importSessionHash: string;
   enhancements: TransactionEnhancement[];
+  detectionMethod?: string;
+  detectionConfidence?: number;
 }
 
 export interface EnhanceImportRequest {

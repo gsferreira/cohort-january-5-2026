@@ -3,6 +3,7 @@ using System.Text;
 using CsvHelper;
 using CsvHelper.Configuration;
 using BudgetTracker.Api.Infrastructure;
+using BudgetTracker.Api.Features.Transactions.Import.Detection;
 
 namespace BudgetTracker.Api.Features.Transactions.Import.Processing;
 
@@ -11,22 +12,43 @@ public class CsvImporter
     public async Task<(ImportResult Result, List<Transaction> Transactions)> ParseCsvAsync(
         Stream csvStream, string sourceFileName, string userId, string account)
     {
+        return await ParseCsvAsync(csvStream, sourceFileName, userId, account, null);
+    }
+
+    public async Task<(ImportResult Result, List<Transaction> Transactions)> ParseCsvAsync(
+        Stream csvStream,
+        string sourceFileName,
+        string userId,
+        string account,
+        CsvStructureDetectionResult? detectionResult)
+    {
         var result = new ImportResult
         {
             SourceFile = sourceFileName,
             ImportedAt = DateTime.UtcNow
         };
 
+        if (detectionResult != null)
+        {
+            result.DetectionMethod = detectionResult.DetectionMethod.ToString();
+            result.DetectionConfidence = detectionResult.ConfidenceScore;
+        }
+
         var transactions = new List<Transaction>();
 
         try
         {
+            var culture = GetCultureInfo(detectionResult?.CultureCode);
+            var delimiter = detectionResult?.Delimiter ?? ',';
+            var columnMappings = detectionResult?.ColumnMappings ?? new Dictionary<string, string>();
+
             using var reader = new StreamReader(csvStream, Encoding.UTF8);
-            using var csv = new CsvReader(reader, new CsvConfiguration(CultureInfo.InvariantCulture)
+            using var csv = new CsvReader(reader, new CsvConfiguration(culture)
             {
                 HasHeaderRecord = true,
                 MissingFieldFound = null,
-                BadDataFound = null
+                BadDataFound = null,
+                Delimiter = delimiter.ToString()
             });
 
             var rowNumber = 0;
@@ -38,7 +60,7 @@ public class CsvImporter
 
                 try
                 {
-                    var transaction = ParseTransactionRow(record);
+                    var transaction = ParseTransactionRow(record, columnMappings, culture);
                     if (transaction != null)
                     {
                         transaction.UserId = userId;
@@ -72,20 +94,45 @@ public class CsvImporter
         }
     }
 
-    private Transaction? ParseTransactionRow(dynamic record)
+    private static CultureInfo GetCultureInfo(string? cultureCode)
+    {
+        if (string.IsNullOrEmpty(cultureCode))
+            return CultureInfo.InvariantCulture;
+
+        try
+        {
+            return CultureInfo.GetCultureInfo(cultureCode);
+        }
+        catch
+        {
+            return CultureInfo.InvariantCulture;
+        }
+    }
+
+    private Transaction? ParseTransactionRow(
+        dynamic record,
+        Dictionary<string, string> columnMappings,
+        CultureInfo culture)
     {
         try
         {
             var recordDict = (IDictionary<string, object>)record;
 
-            // Flexible column mapping - try common variations
-            var description = GetColumnValue(recordDict, "Description", "Memo", "Details");
-            var dateStr = GetColumnValue(recordDict, "Date", "Transaction Date", "Posting Date");
-            var amountStr = GetColumnValue(recordDict, "Amount", "Transaction Amount", "Debit", "Credit");
-            var balanceStr = GetColumnValue(recordDict, "Balance", "Running Balance", "Account Balance");
-            var category = GetColumnValue(recordDict, "Category", "Type", "Transaction Type");
+            var description = GetMappedColumnValue(recordDict, columnMappings, "Description") ??
+                              GetColumnValue(recordDict, "Description", "Memo", "Details");
 
-            // Validate required fields
+            var dateStr = GetMappedColumnValue(recordDict, columnMappings, "Date") ??
+                          GetColumnValue(recordDict, "Date", "Transaction Date", "Posting Date");
+
+            var amountStr = GetMappedColumnValue(recordDict, columnMappings, "Amount") ??
+                            GetColumnValue(recordDict, "Amount", "Transaction Amount", "Debit", "Credit");
+
+            var balanceStr = GetMappedColumnValue(recordDict, columnMappings, "Balance") ??
+                             GetColumnValue(recordDict, "Balance", "Running Balance", "Account Balance");
+
+            var category = GetMappedColumnValue(recordDict, columnMappings, "Category") ??
+                           GetColumnValue(recordDict, "Category", "Type", "Transaction Type");
+
             if (string.IsNullOrWhiteSpace(description))
             {
                 throw new ArgumentException("Description is required");
@@ -101,23 +148,20 @@ public class CsvImporter
                 throw new ArgumentException("Amount is required");
             }
 
-            // Parse date with culture-aware parsing
-            if (!TryParseDate(dateStr, out var date))
+            if (!TryParseDate(dateStr, culture, out var date))
             {
                 throw new ArgumentException($"Invalid date format: {dateStr}");
             }
 
-            // Parse amount using culture-aware parsing
-            if (!TryParseAmount(amountStr, out var amount))
+            if (!TryParseAmount(amountStr, culture, out var amount))
             {
                 throw new ArgumentException($"Invalid amount format: {amountStr}");
             }
 
-            // Parse balance (optional)
             decimal? balance = null;
             if (!string.IsNullOrWhiteSpace(balanceStr))
             {
-                if (TryParseAmount(balanceStr, out var parsedBalance))
+                if (TryParseAmount(balanceStr, culture, out var parsedBalance))
                 {
                     balance = parsedBalance;
                 }
@@ -140,6 +184,24 @@ public class CsvImporter
         }
     }
 
+    private static string? GetMappedColumnValue(
+        IDictionary<string, object> record,
+        Dictionary<string, string> columnMappings,
+        string standardField)
+    {
+        var sourceColumn = columnMappings
+            .FirstOrDefault(m => m.Value == standardField).Key;
+
+        if (!string.IsNullOrEmpty(sourceColumn) &&
+            record.TryGetValue(sourceColumn, out var value) &&
+            value != null)
+        {
+            return value.ToString()?.Trim();
+        }
+
+        return null;
+    }
+
     private static string? GetColumnValue(IDictionary<string, object> record, params string[] columnNames)
     {
         foreach (var columnName in columnNames)
@@ -153,11 +215,16 @@ public class CsvImporter
         return null;
     }
 
-    private bool TryParseDate(string dateStr, out DateTime date)
+    private static bool TryParseDate(string dateStr, CultureInfo culture, out DateTime date)
     {
         date = default;
 
-        // Try culture-aware parsing first
+        if (DateTime.TryParse(dateStr.Trim(), culture,
+            DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out date))
+        {
+            return true;
+        }
+
         if (DateTime.TryParse(dateStr.Trim(), CultureInfo.InvariantCulture,
             DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out date))
         {
@@ -167,7 +234,7 @@ public class CsvImporter
         return false;
     }
 
-    private static bool TryParseAmount(string amountStr, out decimal amount)
+    private static bool TryParseAmount(string amountStr, CultureInfo culture, out decimal amount)
     {
         amount = 0;
 
@@ -175,11 +242,19 @@ public class CsvImporter
             return false;
 
         var cleanAmount = amountStr.Trim();
+        cleanAmount = cleanAmount
+            .Replace("$", "")
+            .Replace("€", "")
+            .Replace("£", "")
+            .Replace("¥", "")
+            .Replace("R$", "")
+            .Trim();
 
-        // Remove common currency symbols
-        cleanAmount = cleanAmount.Replace("$", "").Replace("€", "").Replace("£", "").Replace("¥", "").Replace("R$", "").Trim();
+        if (decimal.TryParse(cleanAmount, NumberStyles.Currency, culture, out amount))
+        {
+            return true;
+        }
 
-        // Use culture-specific parsing - .NET handles decimal/thousand separators automatically
         return decimal.TryParse(cleanAmount, NumberStyles.Currency, CultureInfo.InvariantCulture, out amount);
     }
 }

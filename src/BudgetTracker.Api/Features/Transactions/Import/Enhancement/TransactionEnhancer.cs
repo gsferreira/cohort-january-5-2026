@@ -1,7 +1,7 @@
 using System.Diagnostics;
 using System.Text.Json;
-using System.Text.RegularExpressions;
 using Microsoft.Extensions.AI;
+using BudgetTracker.Api.Infrastructure.Extensions;
 
 namespace BudgetTracker.Api.Features.Transactions.Import.Enhancement;
 
@@ -100,7 +100,7 @@ public class TransactionEnhancer : ITransactionEnhancer
     {
         try
         {
-            var jsonContent = ExtractJsonFromCodeBlock(content);
+            var jsonContent = content.ExtractJsonFromCodeBlock();
             var enhancedDescriptions = JsonSerializer.Deserialize<List<EnhancedTransactionDescription>>(
                 jsonContent,
                 new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
@@ -121,26 +121,6 @@ public class TransactionEnhancer : ITransactionEnhancer
 
         _logger.LogWarning("AI response format was invalid, returning original descriptions");
         return CreateFallbackResponse(originalDescriptions);
-    }
-
-    private static string ExtractJsonFromCodeBlock(string input)
-    {
-        // Look for content between ```json and ``` markers
-        var match = Regex.Match(input, @"```json\s*([\s\S]*?)\s*```");
-
-        if (match.Success)
-        {
-            return match.Groups[1].Value;
-        }
-
-        // Try to find a JSON array directly
-        var arrayMatch = Regex.Match(input, @"\[[\s\S]*\]");
-        if (arrayMatch.Success)
-        {
-            return arrayMatch.Value;
-        }
-
-        throw new FormatException("Could not extract JSON from the input string");
     }
 
     private static List<EnhancedTransactionDescription> CreateFallbackResponse(List<string> descriptions)

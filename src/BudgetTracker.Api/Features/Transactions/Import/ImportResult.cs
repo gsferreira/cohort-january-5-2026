@@ -9,6 +9,10 @@ public class ImportResult
     public string? SourceFile { get; set; }
     public DateTime ImportedAt { get; set; } = DateTime.UtcNow;
 
+    // Detection info
+    public string? DetectionMethod { get; set; }
+    public double DetectionConfidence { get; set; }
+
     // Enhancement support for multi-step workflow
     public string ImportSessionHash { get; set; } = string.Empty;
     public List<TransactionEnhancementResult> Enhancements { get; set; } = new();
