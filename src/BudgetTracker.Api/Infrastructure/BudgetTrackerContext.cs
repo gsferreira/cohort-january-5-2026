@@ -2,6 +2,7 @@ using BudgetTracker.Api.Auth;
 using BudgetTracker.Api.Features.Transactions;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
+using Pgvector.EntityFrameworkCore;
 
 namespace BudgetTracker.Api.Infrastructure;
 
@@ -17,15 +18,7 @@ public class BudgetTrackerContext : IdentityDbContext<ApplicationUser>
     {
         base.OnModelCreating(modelBuilder);
 
-        // Add indexes for better query performance
-        modelBuilder.Entity<Transaction>()
-            .HasIndex(t => t.Date);
-
-        modelBuilder.Entity<Transaction>()
-            .HasIndex(t => t.UserId);
-
-        modelBuilder.Entity<Transaction>()
-            .HasIndex(t => t.ImportedAt);
+        modelBuilder.HasPostgresExtension("vector");
 
         modelBuilder.Entity<Transaction>(entity =>
         {
@@ -38,6 +31,24 @@ public class BudgetTrackerContext : IdentityDbContext<ApplicationUser>
                 .WithMany()
                 .HasForeignKey(t => t.UserId)
                 .HasPrincipalKey(u => u.Id);
+
+            entity.HasIndex(t => t.Date);
+            entity.HasIndex(t => t.UserId);
+            entity.HasIndex(t => t.ImportedAt);
+
+            entity.HasIndex(t => new { t.UserId, t.Account, t.Date })
+                .HasDatabaseName("IX_Transactions_RagContext")
+                .IsDescending(false, false, true);
+
+            entity.HasIndex(t => t.Category)
+                .HasFilter("\"Category\" IS NOT NULL");
+
+            entity.Property(e => e.Embedding)
+                .HasColumnType("vector(1536)");
+
+            entity.HasIndex(e => e.Embedding)
+                .HasMethod("hnsw")
+                .HasOperators("vector_cosine_ops");
         });
     }
 }

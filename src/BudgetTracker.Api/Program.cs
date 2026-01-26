@@ -5,9 +5,12 @@ using BudgetTracker.Api.Features.Transactions;
 using BudgetTracker.Api.Features.Transactions.Import.Processing;
 using BudgetTracker.Api.Features.Transactions.Import.Enhancement;
 using BudgetTracker.Api.Features.Transactions.Import.Detection;
+using BudgetTracker.Api.Features.Intelligence.Search;
+using BudgetTracker.Api.Features.Intelligence.Query;
 using BudgetTracker.Api.Infrastructure;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.AI;
+using Pgvector.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -42,7 +45,8 @@ builder.Services.AddSwaggerGen(c =>
 
 // Add Entity Framework
 builder.Services.AddDbContext<BudgetTrackerContext>(options =>
-    options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
+    options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection"),
+        o => o.UseVector()));
 
 // Add CSV Import Service
 builder.Services.AddScoped<CsvImporter>();
@@ -131,6 +135,27 @@ builder.Services.AddSingleton<IChatClient>(sp =>
         .AsIChatClient();
 });
 
+// Register IEmbeddingGenerator for Azure OpenAI
+builder.Services.AddSingleton<IEmbeddingGenerator<string, Embedding<float>>>(sp =>
+{
+    var config = sp.GetRequiredService<IOptions<AzureAiConfiguration>>().Value;
+    return new AzureOpenAIClient(
+        new Uri(config.Endpoint),
+        new System.ClientModel.ApiKeyCredential(config.ApiKey))
+        .GetEmbeddingClient(config.EmbeddingDeploymentName)
+        .AsIEmbeddingGenerator();
+});
+
+// Register embedding service
+builder.Services.AddScoped<IAzureEmbeddingService, AzureEmbeddingService>();
+
+// Register semantic search and query assistant services
+builder.Services.AddScoped<ISemanticSearchService, SemanticSearchService>();
+builder.Services.AddScoped<IQueryAssistantService, QueryAssistantService>();
+
+// Register embedding background service
+builder.Services.AddHostedService<EmbeddingBackgroundService>();
+
 // Register enhancement service (IChatClient is already registered above)
 builder.Services.AddScoped<ITransactionEnhancer, TransactionEnhancer>();
 
@@ -170,6 +195,7 @@ app
     .MapGroup("/api")
     .MapAntiForgeryEndpoints()
     .MapAuthEndpoints()
-    .MapTransactionEndpoints();
+    .MapTransactionEndpoints()
+    .MapQueryEndpoints();
 
 app.Run();
