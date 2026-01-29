@@ -11,7 +11,6 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.IdentityModel.Tokens;
-using Pgvector.EntityFrameworkCore;
 using Testcontainers.PostgreSql;
 
 namespace BudgetTracker.Api.Tests.Fixtures;
@@ -28,7 +27,7 @@ public class ApiFixture : WebApplicationFactory<IApiAssemblyMarker>, IAsyncLifet
     public async ValueTask InitializeAsync()
     {
         _postgreSqlContainer = new PostgreSqlBuilder()
-            .WithImage("pgvector/pgvector:pg17")
+            .WithImage("postgres:17")
             .WithDatabase("budget_tracker_test")
             .WithUsername("test")
             .WithPassword("test")
@@ -59,7 +58,7 @@ public class ApiFixture : WebApplicationFactory<IApiAssemblyMarker>, IAsyncLifet
             services.RemoveAll(typeof(BudgetTrackerContext));
 
             services.AddDbContext<BudgetTrackerContext>(options =>
-                options.UseNpgsql(ConnectionString, o => o.UseVector()));
+                options.UseNpgsql(ConnectionString));
 
             // Override authorization policy to use only JWT Bearer for tests
             services.AddAuthorization(options =>
@@ -189,7 +188,7 @@ public class ApiFixture : WebApplicationFactory<IApiAssemblyMarker>, IAsyncLifet
     private async Task EnsureDatabaseCreatedAsync()
     {
         var options = new DbContextOptionsBuilder<BudgetTrackerContext>()
-            .UseNpgsql(ConnectionString, o => o.UseVector())
+            .UseNpgsql(ConnectionString)
             .Options;
 
         await using var context = new BudgetTrackerContext(options);

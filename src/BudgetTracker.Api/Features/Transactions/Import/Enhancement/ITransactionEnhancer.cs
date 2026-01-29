@@ -6,7 +6,7 @@ public interface ITransactionEnhancer
         List<string> descriptions,
         string account,
         string userId,
-        string currentImportSessionHash);
+        string? currentImportSessionHash = null);
 }
 
 public class EnhancedTransactionDescription

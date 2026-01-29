@@ -5,7 +5,6 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
-using Pgvector;
 
 #nullable disable
 
@@ -21,7 +20,6 @@ namespace BudgetTracker.Api.Infrastructure.Migrations
                 .HasAnnotation("ProductVersion", "10.0.1")
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
 
-            NpgsqlModelBuilderExtensions.HasPostgresExtension(modelBuilder, "vector");
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
             modelBuilder.Entity("BudgetTracker.Api.Auth.ApplicationUser", b =>
@@ -118,9 +116,6 @@ namespace BudgetTracker.Api.Infrastructure.Migrations
                         .HasMaxLength(500)
                         .HasColumnType("character varying(500)");
 
-                    b.Property<Vector>("Embedding")
-                        .HasColumnType("vector(1536)");
-
                     b.Property<string>("ImportSessionHash")
                         .HasMaxLength(50)
                         .HasColumnType("character varying(50)");
@@ -138,23 +133,11 @@ namespace BudgetTracker.Api.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("Category")
-                        .HasFilter("\"Category\" IS NOT NULL");
-
                     b.HasIndex("Date");
-
-                    b.HasIndex("Embedding");
-
-                    NpgsqlIndexBuilderExtensions.HasMethod(b.HasIndex("Embedding"), "hnsw");
-                    NpgsqlIndexBuilderExtensions.HasOperators(b.HasIndex("Embedding"), new[] { "vector_cosine_ops" });
 
                     b.HasIndex("ImportedAt");
 
                     b.HasIndex("UserId");
-
-                    b.HasIndex("UserId", "Account", "Date")
-                        .IsDescending(false, false, true)
-                        .HasDatabaseName("IX_Transactions_RagContext");
 
                     b.ToTable("Transactions");
                 });

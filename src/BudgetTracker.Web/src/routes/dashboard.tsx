@@ -1,6 +1,5 @@
 import { Link } from 'react-router-dom';
 import Header from '../shared/components/layout/Header';
-import { QueryAssistant } from '../features/intelligence';
 
 export async function loader() {
   return {};
@@ -14,8 +13,13 @@ export default function Dashboard() {
         subtitle="Welcome to your budget tracker"
       />
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-        <QueryAssistant className="lg:col-span-2" />
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+          <h3 className="text-lg font-semibold text-gray-900 mb-2">Getting Started</h3>
+          <p className="text-gray-600">
+            This is your dashboard template. Add your budget tracking features here.
+          </p>
+        </div>
 
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
           <h3 className="text-lg font-semibold text-gray-900 mb-2">Transactions</h3>
@@ -31,9 +35,9 @@ export default function Dashboard() {
         </div>
 
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-          <h3 className="text-lg font-semibold text-gray-900 mb-2">Spending Summary</h3>
+          <h3 className="text-lg font-semibold text-gray-900 mb-2">Ready to Code</h3>
           <p className="text-gray-600">
-            Spending charts will be implemented in future steps.
+            Auth, styling, and project structure are already set up for you.
           </p>
         </div>
       </div>
