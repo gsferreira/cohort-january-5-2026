@@ -1,6 +1,8 @@
 using Azure.AI.OpenAI;
 using BudgetTracker.Api.AntiForgery;
 using BudgetTracker.Api.Auth;
+using BudgetTracker.Api.Features.Intelligence.Query;
+using BudgetTracker.Api.Features.Intelligence.Search;
 using BudgetTracker.Api.Features.Transactions;
 using BudgetTracker.Api.Features.Transactions.Import.Processing;
 using BudgetTracker.Api.Features.Transactions.Import.Enhancement;
@@ -40,9 +42,10 @@ builder.Services.AddSwaggerGen(c =>
     });
 });
 
-// Add Entity Framework
+// Add Entity Framework with pgvector support
 builder.Services.AddDbContext<BudgetTrackerContext>(options =>
-    options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
+    options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection"),
+        o => o.UseVector()));
 
 // Add CSV Import Service
 builder.Services.AddScoped<CsvImporter>();
@@ -131,8 +134,27 @@ builder.Services.AddSingleton<IChatClient>(sp =>
         .AsIChatClient();
 });
 
-// Register enhancement service (IChatClient is already registered above)
+// Register IEmbeddingGenerator using Microsoft.Extensions.AI
+builder.Services.AddSingleton<IEmbeddingGenerator<string, Embedding<float>>>(sp =>
+{
+    var config = sp.GetRequiredService<IOptions<AzureAiConfiguration>>().Value;
+    return new AzureOpenAIClient(
+        new Uri(config.Endpoint),
+        new System.ClientModel.ApiKeyCredential(config.ApiKey))
+        .GetEmbeddingClient(config.EmbeddingDeploymentName)
+        .AsIEmbeddingGenerator();
+});
+
+// Register enhancement service
 builder.Services.AddScoped<ITransactionEnhancer, TransactionEnhancer>();
+
+// Register embedding services
+builder.Services.AddScoped<IAzureEmbeddingService, AzureEmbeddingService>();
+builder.Services.AddHostedService<EmbeddingBackgroundService>();
+
+// Register semantic search and query assistant services
+builder.Services.AddScoped<ISemanticSearchService, SemanticSearchService>();
+builder.Services.AddScoped<IQueryAssistantService, QueryAssistantService>();
 
 var app = builder.Build();
 
@@ -170,6 +192,7 @@ app
     .MapGroup("/api")
     .MapAntiForgeryEndpoints()
     .MapAuthEndpoints()
-    .MapTransactionEndpoints();
+    .MapTransactionEndpoints()
+    .MapQueryEndpoints();
 
 app.Run();
