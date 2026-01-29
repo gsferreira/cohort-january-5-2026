@@ -1,6 +1,8 @@
 using Azure.AI.OpenAI;
 using BudgetTracker.Api.AntiForgery;
 using BudgetTracker.Api.Auth;
+using BudgetTracker.Api.Features.Analytics;
+using BudgetTracker.Api.Features.Analytics.Insights;
 using BudgetTracker.Api.Features.Intelligence.Query;
 using BudgetTracker.Api.Features.Intelligence.Search;
 using BudgetTracker.Api.Features.Transactions;
@@ -156,6 +158,9 @@ builder.Services.AddHostedService<EmbeddingBackgroundService>();
 builder.Services.AddScoped<ISemanticSearchService, SemanticSearchService>();
 builder.Services.AddScoped<IQueryAssistantService, QueryAssistantService>();
 
+// Register analytics services
+builder.Services.AddScoped<IInsightsService, AzureAiInsightsService>();
+
 var app = builder.Build();
 
 // Apply migrations at startup
@@ -193,6 +198,7 @@ app
     .MapAntiForgeryEndpoints()
     .MapAuthEndpoints()
     .MapTransactionEndpoints()
-    .MapQueryEndpoints();
+    .MapQueryEndpoints()
+    .MapAnalyticsEndpoints();
 
 app.Run();

@@ -7,7 +7,7 @@ import ToastContainer from './shared/components/ToastContainer'
 import { ToastProvider } from './shared/contexts/ToastContext'
 import './index.css'
 import { authLoader } from './routes/authLoader'
-import Dashboard, { loader as dashboardLoader } from './routes/dashboard'
+import Dashboard from './routes/dashboard'
 import Import from './routes/import'
 import Root from './routes/root'
 import Transactions, { loader as transactionsLoader } from './routes/transactions'
@@ -30,12 +30,10 @@ const router = createBrowserRouter([
       {
         index: true,
         element: <Dashboard />,
-        loader: dashboardLoader,
       },
       {
         path: 'dashboard',
         element: <Dashboard />,
-        loader: dashboardLoader,
       },
       {
         path: 'transactions',
