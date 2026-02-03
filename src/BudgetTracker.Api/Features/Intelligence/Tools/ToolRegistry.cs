@@ -10,10 +10,14 @@ public interface IToolRegistry
 public class ToolRegistry : IToolRegistry
 {
     private readonly SearchTransactionsTool _searchTransactionsTool;
+    private readonly GetCategorySpendingTool _getCategorySpendingTool;
 
-    public ToolRegistry(SearchTransactionsTool searchTransactionsTool)
+    public ToolRegistry(
+        SearchTransactionsTool searchTransactionsTool,
+        GetCategorySpendingTool getCategorySpendingTool)
     {
         _searchTransactionsTool = searchTransactionsTool;
+        _getCategorySpendingTool = getCategorySpendingTool;
     }
 
     public IList<AITool> GetTools()
@@ -22,7 +26,10 @@ public class ToolRegistry : IToolRegistry
         [
             AIFunctionFactory.Create(
                 _searchTransactionsTool.SearchTransactionsAsync,
-                name: "SearchTransactions")
+                name: "SearchTransactions"),
+            AIFunctionFactory.Create(
+                _getCategorySpendingTool.GetCategorySpendingAsync,
+                name: "GetCategorySpending")
         ];
     }
 }

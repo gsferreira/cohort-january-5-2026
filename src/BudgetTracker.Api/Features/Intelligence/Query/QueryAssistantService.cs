@@ -1,28 +1,24 @@
 using System.Text.Json;
-using BudgetTracker.Api.Infrastructure;
-using BudgetTracker.Api.Features.Intelligence.Search;
+using BudgetTracker.Api.Features.Intelligence.Tools;
 using BudgetTracker.Api.Features.Transactions;
-using Microsoft.EntityFrameworkCore;
+using BudgetTracker.Api.Infrastructure.Extensions;
 using Microsoft.Extensions.AI;
 
 namespace BudgetTracker.Api.Features.Intelligence.Query;
 
 public class QueryAssistantService : IQueryAssistantService
 {
-    private readonly BudgetTrackerContext _context;
-    private readonly ISemanticSearchService _semanticSearchService;
     private readonly IChatClient _chatClient;
+    private readonly IServiceProvider _serviceProvider;
     private readonly ILogger<QueryAssistantService> _logger;
 
     public QueryAssistantService(
-        BudgetTrackerContext context,
-        ISemanticSearchService semanticSearchService,
         IChatClient chatClient,
+        IServiceProvider serviceProvider,
         ILogger<QueryAssistantService> logger)
     {
-        _context = context;
-        _semanticSearchService = semanticSearchService;
         _chatClient = chatClient;
+        _serviceProvider = serviceProvider;
         _logger = logger;
     }
 
@@ -45,23 +41,71 @@ public class QueryAssistantService : IQueryAssistantService
 
         try
         {
-            var userTransactions = GetUserTransactions(userId);
+            // Create a scope to set up the agent context for this user
+            using var scope = _serviceProvider.CreateScope();
+            var agentContext = scope.ServiceProvider.GetRequiredService<AgentContext>();
+            agentContext.UserId = userId;
 
-            if (!await userTransactions.AnyAsync())
+            var toolRegistry = scope.ServiceProvider.GetRequiredService<IToolRegistry>();
+
+            var messages = new List<ChatMessage>
             {
-                return new QueryResponse
+                new(ChatRole.System, CreateSystemPrompt()),
+                new(ChatRole.User, query)
+            };
+
+            var tools = toolRegistry.GetTools();
+            var toolsByName = tools.OfType<AIFunction>().ToDictionary(t => t.Name);
+            var options = new ChatOptions { Tools = tools };
+
+            var maxIterations = 5;
+            var iteration = 0;
+
+            while (iteration < maxIterations)
+            {
+                iteration++;
+                _logger.LogInformation(
+                    "Query agent iteration {Iteration}/{Max} for user {UserId}",
+                    iteration, maxIterations, userId);
+
+                var response = await _chatClient.GetResponseAsync(messages, options);
+                messages.AddMessages(response);
+
+                var toolCalls = response.Messages[0].Contents
+                    .OfType<FunctionCallContent>()
+                    .ToList();
+
+                if (toolCalls.Count > 0)
                 {
-                    Answer =
-                        "You don't have any transactions yet. Import some transactions to start asking questions about your finances."
-                };
+                    await ExecuteToolCallsAsync(messages, toolCalls, toolsByName);
+                }
+                else if (response.FinishReason == ChatFinishReason.Stop)
+                {
+                    _logger.LogInformation("Query agent completed after {Iterations} iterations", iteration);
+
+                    var textContent = response.Messages[0].Contents
+                        .OfType<TextContent>()
+                        .FirstOrDefault();
+
+                    return ParseResponse(textContent?.Text ?? "I couldn't generate an answer.");
+                }
+                else if (response.FinishReason == ChatFinishReason.Length)
+                {
+                    _logger.LogWarning("Query agent max tokens reached at iteration {Iteration}", iteration);
+                    break;
+                }
+                else if (response.FinishReason == ChatFinishReason.ContentFilter)
+                {
+                    _logger.LogWarning("Query agent content filtered at iteration {Iteration}", iteration);
+                    return new QueryResponse { Answer = "I'm unable to process that question." };
+                }
             }
 
-            var relevantTransactions = await _semanticSearchService.FindRelevantTransactionsAsync(
-                query, userId, maxResults: 10);
-
-            var recentTransactions = await userTransactions.Take(10).ToListAsync();
-
-            return await ProcessQueryDirectlyWithAi(query, recentTransactions, relevantTransactions);
+            _logger.LogWarning("Query agent reached max iterations for query: {Query}", query);
+            return new QueryResponse
+            {
+                Answer = "I wasn't able to fully analyze your question. Please try rephrasing it."
+            };
         }
         catch (Exception ex)
         {
@@ -73,231 +117,141 @@ public class QueryAssistantService : IQueryAssistantService
         }
     }
 
-    private IOrderedQueryable<Transaction> GetUserTransactions(string userId)
+    private async Task ExecuteToolCallsAsync(
+        List<ChatMessage> messages,
+        List<FunctionCallContent> toolCalls,
+        Dictionary<string, AIFunction> toolsByName)
     {
-        return _context.Transactions
-            .Where(t => t.UserId == userId)
-            .OrderByDescending(t => t.Date);
-    }
+        _logger.LogInformation("Executing {Count} tool call(s)", toolCalls.Count);
 
-    private async Task<QueryResponse> ProcessQueryDirectlyWithAi(string query, List<Transaction> transactions,
-        List<Transaction> relevantTransactions)
-    {
-        var systemPrompt = CreateSystemPrompt();
-        var userPrompt = CreateUserPrompt(query, transactions, relevantTransactions);
+        foreach (var toolCall in toolCalls)
+        {
+            try
+            {
+                if (!toolsByName.TryGetValue(toolCall.Name, out var tool))
+                {
+                    _logger.LogWarning("Tool not found: {ToolName}", toolCall.Name);
+                    messages.Add(new ChatMessage(ChatRole.Tool, [
+                        new FunctionResultContent(toolCall.CallId,
+                            JsonSerializer.Serialize(new { error = "Tool not found" }))
+                    ]));
+                    continue;
+                }
 
-        var response = await _chatClient.GetResponseAsync([
-            new ChatMessage(ChatRole.System, systemPrompt),
-            new ChatMessage(ChatRole.User, userPrompt)
-        ]);
+                var arguments = toolCall.Arguments is not null
+                    ? new AIFunctionArguments(toolCall.Arguments)
+                    : null;
+                var result = await tool.InvokeAsync(arguments);
 
-        var content = response.Text ?? string.Empty;
-        return ParseAiResponse(content, transactions);
+                messages.Add(new ChatMessage(ChatRole.Tool, [
+                    new FunctionResultContent(toolCall.CallId, result)
+                ]));
+
+                _logger.LogInformation("Tool {ToolName} executed for query agent", tool.Name);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error executing tool {ToolName}", toolCall.Name);
+
+                messages.Add(new ChatMessage(ChatRole.Tool, [
+                    new FunctionResultContent(toolCall.CallId,
+                        JsonSerializer.Serialize(new { error = ex.Message }))
+                ]));
+            }
+        }
     }
 
     private static string CreateSystemPrompt()
     {
         return """
-               You are a helpful financial assistant that answers questions about the user's spending and transactions.
+            You are a financial query assistant that answers questions about a user's transactions.
 
-               You can analyze spending patterns, find specific transactions, calculate totals, identify trends, and provide insights.
-               Be conversational and helpful. Provide specific numbers, dates, and transaction details when relevant.
+            You have access to two tools:
+            - SearchTransactions: Find specific transactions using semantic search (e.g., "coffee", "Amazon", "subscriptions")
+            - GetCategorySpending: Get spending totals grouped by category (e.g., top spending categories, total by category)
 
-               The transactions provided to you have been semantically filtered to be most relevant to the user's query,
-               so you're working with the most pertinent financial data for their question.
+            STRATEGY:
+            - For questions about specific merchants or items: use SearchTransactions
+            - For questions about spending totals or category breakdowns: use GetCategorySpending
+            - For complex questions: combine both tools (e.g., search first, then aggregate)
+            - Only call tools when you need data — if the question is general, answer directly
 
-               When responding, provide:
-               1. A clear, natural language answer to their question
-               2. If relevant, include specific transaction details or amounts
-               3. If showing multiple transactions, limit to the most relevant 3-5 items
+            RESPONSE FORMAT:
+            Always respond with JSON in this exact format:
+            {
+              "answer": "Your natural language answer here",
+              "amount": null,
+              "transactions": null
+            }
 
-               Always respond with JSON in this exact format:
-               {
-                 "answer": "Your natural language response here",
-                 "amount": null or decimal value if relevant,
-                 "transactions": null or array of relevant transaction objects
-               }
+            - "answer": A clear, conversational response referencing specific data you found
+            - "amount": A decimal value if the question asks about a total or amount (null otherwise)
+            - "transactions": An array of relevant transactions if applicable (null otherwise)
 
-               For transactions, use this format:
-               {
-                 "id": "transaction-guid",
-                 "date": "YYYY-MM-DD",
-                 "description": "transaction description",
-                 "amount": decimal-value,
-                 "category": "category-name-or-null",
-                 "account": "account-name"
-               }
+            For transactions, use this format:
+            {
+              "id": "transaction-guid",
+              "date": "YYYY-MM-DD",
+              "description": "transaction description",
+              "amount": -42.50,
+              "category": "category-name",
+              "account": "account-name"
+            }
 
-               Examples of queries you can handle:
-               - "What was my biggest expense last week?"
-               - "Show me all Amazon purchases"
-               - "What categories do I spend the most on?"
-               - "Show me transactions over $100"
-               - "When did I last go to Starbucks?"
-               - "How much have I saved this year?"
-               - "Find all my coffee-related expenses"
-               - "Show me subscription services I'm paying for"
-               - "What do I spend on transportation?"
-               """;
+            Include up to 5 relevant transactions when they help illustrate your answer.
+            """;
     }
 
-    private static string CreateUserPrompt(string query, List<Transaction> transactions,
-        List<Transaction> relevantTransactions)
-    {
-        var earliestDate = transactions.Min(t => t.Date);
-        var latestDate = transactions.Max(t => t.Date);
-        var totalTransactions = transactions.Count;
-        var totalIncome = transactions.Where(t => t.Amount > 0).Sum(t => t.Amount);
-        var totalExpenses = Math.Abs(transactions.Where(t => t.Amount < 0).Sum(t => t.Amount));
-
-        var categoryBreakdown = transactions
-            .Where(t => t.Amount < 0 && !string.IsNullOrEmpty(t.Category))
-            .GroupBy(t => t.Category!)
-            .Select(g => new { Category = g.Key, Total = Math.Abs(g.Sum(t => t.Amount)) })
-            .OrderByDescending(c => c.Total)
-            .Take(10)
-            .ToList();
-
-        var recentTransactions = transactions
-            .OrderByDescending(t => t.Date)
-            .Take(10)
-            .Select(t => new
-            {
-                Id = t.Id,
-                Date = t.Date.ToString("yyyy-MM-dd"),
-                Description = t.Description,
-                Amount = t.Amount,
-                Category = t.Category,
-                Account = t.Account
-            })
-            .ToList();
-
-        var relatedTransactions = relevantTransactions
-            .OrderByDescending(t => t.Date)
-            .Take(10)
-            .Select(t => new
-            {
-                Id = t.Id,
-                Date = t.Date.ToString("yyyy-MM-dd"),
-                Description = t.Description,
-                Amount = t.Amount,
-                Category = t.Category,
-                Account = t.Account
-            })
-            .ToList();
-
-        var transactionsJson =
-            JsonSerializer.Serialize(recentTransactions, new JsonSerializerOptions { WriteIndented = false });
-
-        var relevantTransactionsJson =
-            JsonSerializer.Serialize(relatedTransactions, new JsonSerializerOptions { WriteIndented = false });
-
-        return $"""
-                User query: "{query}"
-
-                Transaction Summary:
-                - Total transactions: {totalTransactions}
-                - Date range: {earliestDate:yyyy-MM-dd} to {latestDate:yyyy-MM-dd}
-                - Total income: €{totalIncome:F2}
-                - Total expenses: €{totalExpenses:F2}
-                - Net amount: €{(totalIncome - totalExpenses):F2}
-
-                Top spending categories:
-                {string.Join("\n", categoryBreakdown.Select(c => $"- {c.Category}: €{c.Total:F2}"))}
-
-                Recent transactions (sample of {recentTransactions.Count}):
-                {transactionsJson}
-
-                Relevant transactions for the prompt:
-                {relevantTransactionsJson}
-
-                Please analyze this data and answer the user's query. Include specific transaction details in your response when relevant.
-                """;
-    }
-
-    private QueryResponse ParseAiResponse(string content, List<Transaction> transactions)
+    private QueryResponse ParseResponse(string content)
     {
         try
         {
-            var jsonResponse = JsonSerializer.Deserialize<AiQueryResponse>(content, new JsonSerializerOptions
+            var cleaned = content.ExtractJsonFromCodeBlock();
+            var parsed = JsonSerializer.Deserialize<JsonElement>(cleaned);
+
+            var answer = parsed.TryGetProperty("answer", out var answerEl)
+                ? answerEl.GetString() ?? content
+                : content;
+
+            decimal? amount = parsed.TryGetProperty("amount", out var amountEl)
+                && amountEl.ValueKind == JsonValueKind.Number
+                    ? amountEl.GetDecimal()
+                    : null;
+
+            var transactions = new List<TransactionDto>();
+            if (parsed.TryGetProperty("transactions", out var txArray)
+                && txArray.ValueKind == JsonValueKind.Array)
             {
-                PropertyNameCaseInsensitive = true
-            });
-
-            if (jsonResponse == null)
-            {
-                return new QueryResponse { Answer = "I couldn't process your question. Please try rephrasing it." };
-            }
-
-            var response = new QueryResponse
-            {
-                Answer = jsonResponse.Answer ?? "I processed your query but couldn't generate a response.",
-                Amount = jsonResponse.Amount
-            };
-
-            if (jsonResponse.Transactions == null || jsonResponse.Transactions.Count == 0) return response;
-
-            var matchedTransactions = new List<TransactionDto>();
-
-            foreach (var aiTransaction in jsonResponse.Transactions.Take(5))
-            {
-                if (Guid.TryParse(aiTransaction.Id, out var transactionId))
+                foreach (var tx in txArray.EnumerateArray())
                 {
-                    var actualTransaction = transactions.FirstOrDefault(t => t.Id == transactionId);
-                    if (actualTransaction != null)
+                    transactions.Add(new TransactionDto
                     {
-                        matchedTransactions.Add(actualTransaction.MapToDto());
-                        continue;
-                    }
-                }
-
-                if (DateTime.TryParse(aiTransaction.Date, out var date))
-                {
-                    matchedTransactions.Add(new TransactionDto
-                    {
-                        Id = Guid.TryParse(aiTransaction.Id, out var id) ? id : Guid.NewGuid(),
-                        Date = date,
-                        Description = aiTransaction.Description ?? "Transaction",
-                        Amount = aiTransaction.Amount,
-                        Category = aiTransaction.Category,
-                        Account = aiTransaction.Account ?? "Account",
-                        ImportedAt = DateTime.UtcNow
+                        Id = tx.TryGetProperty("id", out var id)
+                            && Guid.TryParse(id.GetString(), out var guid) ? guid : Guid.NewGuid(),
+                        Date = tx.TryGetProperty("date", out var date)
+                            && DateTime.TryParse(date.GetString(), out var d) ? d : DateTime.MinValue,
+                        Description = tx.TryGetProperty("description", out var desc)
+                            ? desc.GetString() ?? "" : "",
+                        Amount = tx.TryGetProperty("amount", out var amt)
+                            && amt.ValueKind == JsonValueKind.Number ? amt.GetDecimal() : 0,
+                        Category = tx.TryGetProperty("category", out var cat)
+                            ? cat.GetString() : null,
+                        Account = tx.TryGetProperty("account", out var acc)
+                            ? acc.GetString() ?? "" : ""
                     });
                 }
             }
 
-            if (matchedTransactions.Count != 0)
-            {
-                response.Transactions = matchedTransactions;
-            }
-
-            return response;
-        }
-        catch (JsonException ex)
-        {
-            _logger.LogWarning(ex, "Failed to parse AI response: {Content}", content);
             return new QueryResponse
             {
-                Answer =
-                    "I processed your question but had trouble formatting the response. Please try asking in a different way."
+                Answer = answer,
+                Amount = amount,
+                Transactions = transactions.Count > 0 ? transactions : null
             };
         }
-    }
-
-    private class AiQueryResponse
-    {
-        public string? Answer { get; set; }
-        public decimal? Amount { get; set; }
-        public List<AiTransactionReference>? Transactions { get; set; }
-    }
-
-    private class AiTransactionReference
-    {
-        public string Id { get; set; } = string.Empty;
-        public string Date { get; set; } = string.Empty;
-        public string? Description { get; set; }
-        public decimal Amount { get; set; }
-        public string? Category { get; set; }
-        public string? Account { get; set; }
+        catch (Exception)
+        {
+            return new QueryResponse { Answer = content };
+        }
     }
 }

@@ -173,6 +173,7 @@ builder.Services.AddHostedService<RecommendationBackgroundService>();
 builder.Services.AddScoped<AgentContext>();
 builder.Services.AddScoped<IAgentContext>(sp => sp.GetRequiredService<AgentContext>());
 builder.Services.AddScoped<SearchTransactionsTool>();
+builder.Services.AddScoped<GetCategorySpendingTool>();
 builder.Services.AddScoped<IToolRegistry, ToolRegistry>();
 
 var app = builder.Build();
