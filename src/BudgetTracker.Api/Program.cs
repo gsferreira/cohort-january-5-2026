@@ -3,8 +3,11 @@ using BudgetTracker.Api.AntiForgery;
 using BudgetTracker.Api.Auth;
 using BudgetTracker.Api.Features.Analytics;
 using BudgetTracker.Api.Features.Analytics.Insights;
+using BudgetTracker.Api.Features.Intelligence;
 using BudgetTracker.Api.Features.Intelligence.Query;
+using BudgetTracker.Api.Features.Intelligence.Recommendations;
 using BudgetTracker.Api.Features.Intelligence.Search;
+using BudgetTracker.Api.Features.Intelligence.Tools;
 using BudgetTracker.Api.Features.Transactions;
 using BudgetTracker.Api.Features.Transactions.Import.Processing;
 using BudgetTracker.Api.Features.Transactions.Import.Enhancement;
@@ -161,6 +164,17 @@ builder.Services.AddScoped<IQueryAssistantService, QueryAssistantService>();
 // Register analytics services
 builder.Services.AddScoped<IInsightsService, AzureAiInsightsService>();
 
+// Register recommendation services
+builder.Services.AddScoped<IRecommendationRepository, RecommendationAgent>();
+builder.Services.AddScoped<IRecommendationWorker, RecommendationProcessor>();
+builder.Services.AddHostedService<RecommendationBackgroundService>();
+
+// Register tool services for agentic recommendations
+builder.Services.AddScoped<AgentContext>();
+builder.Services.AddScoped<IAgentContext>(sp => sp.GetRequiredService<AgentContext>());
+builder.Services.AddScoped<SearchTransactionsTool>();
+builder.Services.AddScoped<IToolRegistry, ToolRegistry>();
+
 var app = builder.Build();
 
 // Apply migrations at startup
@@ -198,7 +212,7 @@ app
     .MapAntiForgeryEndpoints()
     .MapAuthEndpoints()
     .MapTransactionEndpoints()
-    .MapQueryEndpoints()
+    .MapIntelligenceEndpoints()
     .MapAnalyticsEndpoints();
 
 app.Run();

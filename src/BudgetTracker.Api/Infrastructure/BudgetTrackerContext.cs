@@ -1,4 +1,5 @@
 using BudgetTracker.Api.Auth;
+using BudgetTracker.Api.Features.Intelligence.Recommendations;
 using BudgetTracker.Api.Features.Transactions;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
@@ -13,6 +14,7 @@ public class BudgetTrackerContext : IdentityDbContext<ApplicationUser>
     }
 
     public DbSet<Transaction> Transactions { get; set; }
+    public DbSet<Recommendation> Recommendations { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
