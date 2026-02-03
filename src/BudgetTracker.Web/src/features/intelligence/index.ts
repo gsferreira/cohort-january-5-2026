@@ -1,4 +1,3 @@
-export { intelligenceApi } from './api';
-export { RecommendationsCard } from './components/RecommendationsCard';
 export { default as QueryAssistant } from './components/QueryAssistant';
-export type { ProactiveRecommendation } from './api';
+export { intelligenceApi } from './api';
+export type { QueryResponse, TransactionDto } from './api';
