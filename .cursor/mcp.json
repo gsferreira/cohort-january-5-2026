@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "budget-tracker": {
+      "command": "dotnet",
+      "args": [
+        "run",
+        "--project",
+        "src/BudgetTracker.McpServer/BudgetTracker.McpServer.csproj"
+      ],
+      "env": {
+        "DOTNET_ENVIRONMENT": "Development",
+        "BUDGET_TRACKER_API_KEY": "bt_mcp_key_2025_secure_static_api_key_for_ai_integration"
+      }
+    }
+  }
+}
